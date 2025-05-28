@@ -1,1 +1,1 @@
-# goldwick-api
+# goldwick_api
