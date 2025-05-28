@@ -15,3 +15,8 @@ def root():
 def signal():
     # minimal placeholder: just prove the API works
     return {"status": "online"}
+
+@app.post("/signal")
+async def signal_post():
+    return signal()    # reuse the same logic
+
