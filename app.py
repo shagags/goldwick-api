@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 import os, requests, pandas as pd
 
-TOKEN = os.getenv("OANDA_TOKEN")
+TOKEN = os.getenv("41b3a96dcf48a9f9376c60f7804e3570-68be605e345f3a56e808e32a6b734e3a")
 BASE_URL = "https://api-fxpractice.oanda.com"
 INSTRUMENT = "XAU_USD"
 
@@ -20,8 +20,8 @@ import pandas as pd, requests, datetime as dt, os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-TOKEN     = os.getenv("OANDA_TOKEN")
-ACCOUNT   = os.getenv("OANDA_ACCOUNT")
+TOKEN     = os.getenv("41b3a96dcf48a9f9376c60f7804e3570-68be605e345f3a56e808e32a6b734e3a")
+ACCOUNT   = os.getenv("101-002-31761893-001")
 BASE_URL  = "https://api-fxpractice.oanda.com"   # use api-fxtrade.oanda.com for live
 INSTRUMENT= "XAU_USD"
 EMA_SPAN  = 50
