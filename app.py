@@ -16,62 +16,75 @@ def signal():
     # minimal placeholder: just prove the API works
     return {"status": "online"}
 
-import requests, pandas as pd, datetime as dt, os
+import pandas as pd, requests, datetime as dt, os
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
-TOKEN = os.getenv("OANDA_TOKEN")
-BASE_URL = "https://api-fxpractice.oanda.com"
-INSTRUMENT = "XAU_USD"
+TOKEN     = os.getenv("OANDA_TOKEN")
+ACCOUNT   = os.getenv("OANDA_ACCOUNT")
+BASE_URL  = "https://api-fxpractice.oanda.com"   # use api-fxtrade.oanda.com for live
+INSTRUMENT= "XAU_USD"
 EMA_SPAN  = 50
-SL_PIPS   = 5
-TP_PIPS   = 7.5
+BUFF      = 0.05
+TP_FACT   = 1.5
 
+app = FastAPI(title="Gold Wick-Rejection API")
+
+class Signal(BaseModel):
+    direction: str
+    entry: float
+    sl: float
+    tp: float
+    timestamp: str
+
+# ---------- fetch the last 60 one-minute candles ----------
 def fetch_candles(count=60):
-    url = f"{BASE_URL}/v3/instruments/{INSTRUMENT}/candles"
-    r = requests.get(url,
-                     params={"count": count, "granularity": "M1", "price":"M"},
-                     headers={"Authorization": f"Bearer {TOKEN}"},
-                     timeout=10)
-    r.raise_for_status()
-    data = []
+    endpoint = f"{BASE_URL}/v3/instruments/{INSTRUMENT}/candles"
+    params   = {"count": count, "granularity": "M1", "price": "M"}
+    headers  = {"Authorization": f"Bearer {TOKEN}"}
+    r = requests.get(endpoint, params=params, headers=headers, timeout=10)
+    if r.status_code != 200:
+        raise HTTPException(502, f"OANDA error {r.status_code}: {r.text}")
+
+    rows = []
     for c in r.json()["candles"]:
         m = c["mid"]
-        data.append(dict(time=c["time"],
-                         open=float(m["o"]),
-                         high=float(m["h"]),
-                         low=float(m["l"]),
-                         close=float(m["c"])))
-    return pd.DataFrame(data)
+        rows.append(dict(Open=float(m["o"]),
+                         High=float(m["h"]),
+                         Low=float(m["l"]),
+                         Close=float(m["c"]),
+                         Time=c["time"]))
+    return pd.DataFrame(rows)
 
-@app.post("/signal")
-@app.get("/signal")
-async def signal():
+# ---------- trading logic ----------
+def generate_signal():
     df = fetch_candles()
-    df["ema"] = df["close"].ewm(span=EMA_SPAN, adjust=False).mean()
+    df["EMA"] = df["Close"].ewm(span=EMA_SPAN, adjust=False).mean()
+    prev = df.iloc[-2]
 
-    prev, cur = df.iloc[-2], df.iloc[-1]
-    body  = abs(prev.close - prev.open) + 1e-6
-    up_w  = prev.high - max(prev.open, prev.close)
-    low_w = min(prev.open, prev.close) - prev.low
-    trend_up   = prev.close > prev.ema
-    trend_down = prev.close < prev.ema
+    trend_up   = prev.Close > prev.EMA
+    trend_down = prev.Close < prev.EMA
+    body  = abs(prev.Close - prev.Open) + 1e-6
+    upper = prev.High - max(prev.Open, prev.Close)
+    lower = min(prev.Open, prev.Close) - prev.Low
 
-    if trend_up and low_w/body > .5 and prev.low < prev.ema <= prev.close:
-        entry = cur.open
-        return {
-            "direction": "BUY",
-            "entry": round(entry,2),
-            "sl":   round(entry-SL_PIPS,2),
-            "tp":   round(entry+TP_PIPS,2),
-            "timestamp": dt.datetime.utcnow().isoformat()
-        }
-    if trend_down and up_w/body > .5 and prev.high > prev.ema >= prev.close:
-        entry = cur.open
-        return {
-            "direction": "SELL",
-            "entry": round(entry,2),
-            "sl":   round(entry+SL_PIPS,2),
-            "tp":   round(entry-TP_PIPS,2),
-            "timestamp": dt.datetime.utcnow().isoformat()
-        }
-    return {"direction":"NONE","msg":"no valid wick right now"}
+    if trend_up and lower/body > 0.5 and prev.Low < prev.EMA <= prev.Close:
+        entry = df.iloc[-1].Open
+        sl    = prev.Low - BUFF
+        tp    = entry + (entry - sl) * TP_FACT
+        return Signal(direction="long", entry=entry, sl=sl, tp=tp,
+                      timestamp=dt.datetime.utcnow().isoformat())
 
+    if trend_down and upper/body > 0.5 and prev.High > prev.EMA >= prev.Close:
+        entry = df.iloc[-1].Open
+        sl    = prev.High + BUFF
+        tp    = entry - (sl - entry) * TP_FACT
+        return Signal(direction="short", entry=entry, sl=sl, tp=tp,
+                      timestamp=dt.datetime.utcnow().isoformat())
+
+    return Signal(direction="none", entry=0, sl=0, tp=0,
+                  timestamp=dt.datetime.utcnow().isoformat())
+
+@app.post("/signal", response_model=Signal)
+async def signal():
+    return generate_signal()
