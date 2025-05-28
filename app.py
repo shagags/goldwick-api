@@ -7,6 +7,10 @@ INSTRUMENT = "XAU_USD"
 
 app = FastAPI()
 
+@app.get("/")
+def root():
+    return {"status": "online"}
+
 @app.get("/signal")
 def signal():
     # minimal placeholder: just prove the API works
