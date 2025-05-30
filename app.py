@@ -37,33 +37,36 @@ def fetch_candles(count=60):
 
 # ----------------- core signal logic ------------------------------------
 @app.get("/signal")
-def generate_signal():
+def signal():
     df = fetch_candles()
-    df["EMA"] = df["Close"].ewm(span=EMA_SPAN, adjust=False).mean()
-    prev = df.iloc[-2]
+    df["ema"] = df["close"].ewm(span=EMA_SPAN, adjust=False).mean()
+    prev, cur = df.iloc[-2], df.iloc[-1]
 
-    trend_up   = prev.Close > prev.EMA
-    trend_down = prev.Close < prev.EMA
-    body  = abs(prev.Close - prev.Open) + 1e-6
-    upper = prev.High - max(prev.Open, prev.Close)
-    lower = min(prev.Open, prev.Close) - prev.Low
+    body  = abs(prev.close - prev.open) + 1e-6
+    up_w  = prev.high - max(prev.open, prev.close)
+    lo_w  = min(prev.open, prev.close) - prev.low
+    trend_up   = prev.close > prev.ema
+    trend_down = prev.close < prev.ema
 
-    if trend_up and lower/body > 0.5 and prev.Low < prev.EMA <= prev.Close:
-        entry = df.iloc[-1].Open
-        sl    = prev.Low - BUFF
-        tp    = entry + (entry - sl) * TP_FACT
-        return Signal(direction="long", entry=entry, sl=sl, tp=tp,
-                      timestamp=dt.datetime.utcnow().isoformat())
-
-    if trend_down and upper/body > 0.5 and prev.High > prev.EMA >= prev.Close:
-        entry = df.iloc[-1].Open
-        sl    = prev.High + BUFF
-        tp    = entry - (sl - entry) * TP_FACT
-        return Signal(direction="short", entry=entry, sl=sl, tp=tp,
-                      timestamp=dt.datetime.utcnow().isoformat())
-
-    return Signal(direction="none", entry=0, sl=0, tp=0,
-                  timestamp=dt.datetime.utcnow().isoformat())
+    if trend_up and lo_w/body > .5 and prev.low < prev.ema <= prev.close:
+        entry = cur.open
+        return {
+            "direction": "BUY",
+            "entry": round(entry,2),
+            "sl":   round(entry - SL_PIPS,2),
+            "tp":   round(entry + TP_PIPS,2),
+            "timestamp": dt.datetime.utcnow().isoformat()
+        }
+    if trend_down and up_w/body > .5 and prev.high > prev.ema >= prev.close:
+        entry = cur.open
+        return {
+            "direction": "SELL",
+            "entry": round(entry,2),
+            "sl":   round(entry + SL_PIPS,2),
+            "tp":   round(entry - TP_PIPS,2),
+            "timestamp": dt.datetime.utcnow().isoformat()
+        }
+    return {"direction": "NONE", "msg": "no valid setup right now"}
 
 # allow GPT (which uses POST) to hit the same route
 @app.post("/signal")
